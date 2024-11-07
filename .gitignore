@@ -92,7 +92,7 @@ bin
 obj
 appsettings.json
 local.settings.json
-
+credentials.json
 # Azurite artifacts
 __blobstorage__
 __queuestorage__
