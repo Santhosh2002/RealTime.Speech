@@ -7,13 +7,15 @@ const { SpeechClient } = require("@google-cloud/speech");
 const { TextToSpeechClient } = require("@google-cloud/text-to-speech");
 const cors = require("cors");
 const stream = require("stream");
+const morgan = require("morgan");
 
 const app = express();
 app.use(cors()); // Enable CORS for client access
+app.use(morgan("combined")); // Use morgan for HTTP request logging
 
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
-const PORT = 5000;
+const port = process.env.PORT || 8080;
 
 // Google Cloud clients
 const speechClient = new SpeechClient();
@@ -23,13 +25,15 @@ let lastTranscription = ""; // Store last transcription to filter duplicates
 
 // WebSocket connection for real-time transcription
 wss.on("connection", (ws) => {
-  console.log("Client connected");
+  console.log("WebSocket connection established with client");
 
   let recognizeStream = null;
 
   ws.on("message", (data) => {
+    console.log("Received data from client:", data);
+
     if (!recognizeStream) {
-      // Initialize Google Cloud recognize stream for speech-to-text
+      console.log("Initializing Google Cloud Speech streaming recognize");
       recognizeStream = speechClient
         .streamingRecognize({
           config: {
@@ -46,16 +50,15 @@ wss.on("connection", (ws) => {
           if (result && result.isFinal) {
             const transcription = result.alternatives[0].transcript.trim();
 
-            // Only send if transcription differs from last to prevent repeats
             if (transcription !== lastTranscription) {
               ws.send(transcription); // Send transcription to client
               lastTranscription = transcription;
-              console.log("Transcription:", transcription);
+              console.log("Transcription sent to client:", transcription);
             }
           }
         })
         .on("error", (error) => {
-          console.error("Error:", error);
+          console.error("Google Cloud Speech streaming error:", error);
           if (recognizeStream) {
             recognizeStream.end();
             recognizeStream = null;
@@ -72,11 +75,12 @@ wss.on("connection", (ws) => {
       const audioBufferStream = new stream.PassThrough();
       audioBufferStream.end(data);
       audioBufferStream.pipe(recognizeStream, { end: false });
+      console.log("Audio data piped to Google Speech API");
     }
   });
 
   ws.on("close", () => {
-    console.log("Client disconnected");
+    console.log("Client disconnected from WebSocket");
     if (recognizeStream) {
       recognizeStream.end();
       recognizeStream = null;
@@ -87,19 +91,22 @@ wss.on("connection", (ws) => {
 // REST endpoint for Text-to-Speech
 app.get("/text-to-speech", async (req, res) => {
   const { text } = req.query; // Get text from query parameters
+  console.log("Received text for TTS:", text);
 
-  // Set up request for Google Text-to-Speech
   const request = {
     input: { text },
-    voice: { languageCode: "en-US", ssmlGender: "NEUTRAL" },
+    voice: {
+      languageCode: "en-IN",
+      ssmlGender: "FEMALE",
+      name: "en-IN-Journey-O",
+    },
     audioConfig: { audioEncoding: "MP3" },
   };
 
   try {
-    // Performs the Text-to-Speech request
     const [response] = await textToSpeechClient.synthesizeSpeech(request);
+    console.log("Text-to-Speech audio generated");
 
-    // Send audio back to client
     res.set("Content-Type", "audio/mpeg");
     res.send(response.audioContent);
   } catch (error) {
@@ -109,6 +116,6 @@ app.get("/text-to-speech", async (req, res) => {
 });
 
 // Start the server
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+server.listen(port, () => {
+  console.log(`Server running on port ${port}`);
 });
